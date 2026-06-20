@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cauce-postgres
+    environment:
+      POSTGRES_USER: cauce
+      POSTGRES_PASSWORD: cauce_dev_password
+      POSTGRES_DB: cauce_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - cauce-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cauce -d cauce_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  adminer:
+    image: adminer:4.8.1
+    container_name: cauce-adminer
+    ports:
+      - "8080:8080"
+    networks:
+      - cauce-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    name: cauce_postgres_data
+
+networks:
+  cauce-network:
+    name: cauce-network
+    driver: bridge
