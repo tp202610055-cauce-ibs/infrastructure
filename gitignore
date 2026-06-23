@@ -1,0 +1,24 @@
+# Variables de entorno con secretos
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Backups locales
+*.dump
+*.sql.backup
+postgres-backups/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores
+.vscode/
+.idea/
+*.swp
+*.swo

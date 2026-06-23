@@ -1,40 +1,227 @@
+# =============================================================================
+# Cauce — Stack de infraestructura local (Docker Compose) — v2
+# =============================================================================
+# Servicios sin "profiles" arrancan SIEMPRE: postgres, adminer.
+# Servicios con profile arrancan SOLO cuando se invoca con --profile <nombre>.
+#
+# Perfiles disponibles:
+#   auth   -> añade Keycloak + Mailpit (SMTP de testing)
+#   infra  -> añade KeyDB + MinIO
+#   ai     -> añade Ollama (LLM local)
+#   all    -> equivale a auth + infra + ai
+#
+# Ejemplos:
+#   docker compose up -d                          # solo Postgres + Adminer
+#   docker compose --profile auth up -d           # + Keycloak + Mailpit
+#   docker compose --profile auth --profile infra up -d
+#   docker compose --profile all up -d            # todo
+# =============================================================================
+
 services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 16: BD principal de Cauce + BD secundaria para Keycloak
+  # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
     container_name: cauce-postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: cauce
-      POSTGRES_PASSWORD: cauce_dev_password
-      POSTGRES_DB: cauce_db
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      KEYCLOAK_DB_NAME: ${KEYCLOAK_DB_NAME}
+      KEYCLOAK_DB_USER: ${KEYCLOAK_DB_USER}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - cauce-network
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cauce -d cauce_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
-
-  adminer:
-    image: adminer:4.8.1
-    container_name: cauce-adminer
-    ports:
-      - "8080:8080"
+      start_period: 10s
     networks:
       - cauce-network
+
+  # ---------------------------------------------------------------------------
+  # Adminer: UI web para administrar Postgres
+  # ---------------------------------------------------------------------------
+  adminer:
+    image: adminer:4-standalone
+    container_name: cauce-adminer
+    restart: unless-stopped
+    ports:
+      - "${ADMINER_PORT:-8080}:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: pepa-linha-dark
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - cauce-network
+
+  # ---------------------------------------------------------------------------
+  # Mailpit: SMTP de testing + UI web para ver emails capturados
+  # Captura todo lo que se envía y lo muestra en http://localhost:8025
+  # ---------------------------------------------------------------------------
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: cauce-mailpit
     restart: unless-stopped
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    environment:
+      MP_MAX_MESSAGES: 5000
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8025/api/v1/messages"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    profiles: [auth, all]
+    networks:
+      - cauce-network
 
+  # ---------------------------------------------------------------------------
+  # Keycloak: servidor de identidad (OIDC / JWT)
+  # Importa el realm.json automáticamente al primer arranque
+  # ---------------------------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    container_name: cauce-keycloak
+    restart: unless-stopped
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${KEYCLOAK_DB_NAME}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+    ports:
+      - "${KEYCLOAK_PORT:-8081}:8080"
+    volumes:
+      - ./keycloak/import:/opt/keycloak/data/import:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'"
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
+    profiles: [auth, all]
+    networks:
+      - cauce-network
+
+  # ---------------------------------------------------------------------------
+  # KeyDB: caché + Streams para colas asíncronas (compatible con Redis)
+  # ---------------------------------------------------------------------------
+  keydb:
+    image: eqalpha/keydb:alpine
+    container_name: cauce-keydb
+    restart: unless-stopped
+    command: keydb-server --requirepass ${KEYDB_PASSWORD} --appendonly yes
+    ports:
+      - "${KEYDB_PORT:-6379}:6379"
+    volumes:
+      - keydb-data:/data
+    environment:
+      KEYDB_PASSWORD: ${KEYDB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "keydb-cli -a $$KEYDB_PASSWORD ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles: [infra, all]
+    networks:
+      - cauce-network
+
+  # ---------------------------------------------------------------------------
+  # MinIO: almacenamiento de objetos S3-compatible
+  # API en 9000, consola web en 9001
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: cauce-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    profiles: [infra, all]
+    networks:
+      - cauce-network
+
+  # ---------------------------------------------------------------------------
+  # Ollama: servidor LLM local (Llama 3.1 8B Q4)
+  # CONSUME 5-6 GB DE RAM EN INFERENCIA. Levantarlo solo cuando se necesite.
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: cauce-ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    profiles: [ai, all]
+    networks:
+      - cauce-network
+
+# =============================================================================
+# VOLÚMENES PERSISTENTES (sobreviven a docker compose down)
+# Para borrar TODO incluyendo datos: docker compose down -v
+# =============================================================================
 volumes:
-  postgres_data:
-    name: cauce_postgres_data
+  postgres-data:
+    name: cauce-postgres-data
+  keydb-data:
+    name: cauce-keydb-data
+  minio-data:
+    name: cauce-minio-data
+  ollama-data:
+    name: cauce-ollama-data
 
+# =============================================================================
+# RED INTERNA: todos los servicios se descubren por nombre dentro de esta red
+# Ej: desde Keycloak, Postgres es `postgres:5432`, no `localhost:5432`
+# =============================================================================
 networks:
   cauce-network:
     name: cauce-network
