@@ -1,22 +1,3 @@
-# =============================================================================
-# Cauce — Stack de infraestructura local (Docker Compose) — v2
-# =============================================================================
-# Servicios sin "profiles" arrancan SIEMPRE: postgres, adminer.
-# Servicios con profile arrancan SOLO cuando se invoca con --profile <nombre>.
-#
-# Perfiles disponibles:
-#   auth   -> añade Keycloak + Mailpit (SMTP de testing)
-#   infra  -> añade KeyDB + MinIO
-#   ai     -> añade Ollama (LLM local)
-#   all    -> equivale a auth + infra + ai
-#
-# Ejemplos:
-#   docker compose up -d                          # solo Postgres + Adminer
-#   docker compose --profile auth up -d           # + Keycloak + Mailpit
-#   docker compose --profile auth --profile infra up -d
-#   docker compose --profile all up -d            # todo
-# =============================================================================
-
 services:
 
   # ---------------------------------------------------------------------------
