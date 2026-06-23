@@ -1,0 +1,157 @@
+{
+  "realm": "cauce",
+  "displayName": "Cauce — Sistema de Recomendaciones SII",
+  "enabled": true,
+
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": true,
+  "rememberMe": false,
+  "verifyEmail": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "loginTheme": "keycloak",
+  "accountTheme": "keycloak",
+  "emailTheme": "keycloak",
+
+  "internationalizationEnabled": true,
+  "supportedLocales": ["es"],
+  "defaultLocale": "es",
+
+  "accessTokenLifespan": 900,
+  "accessTokenLifespanForImplicitFlow": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 2592000,
+  "offlineSessionIdleTimeout": 2592000,
+  "offlineSessionMaxLifespanEnabled": true,
+  "offlineSessionMaxLifespan": 5184000,
+  "actionTokenGeneratedByAdminLifespan": 43200,
+  "actionTokenGeneratedByUserLifespan": 1800,
+
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "minimumQuickLoginWaitSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "maxDeltaTimeSeconds": 43200,
+
+  "passwordPolicy": "length(8) and digits(1) and upperCase(1) and lowerCase(1) and notUsername(undefined)",
+
+  "smtpServer": {
+    "host": "mailpit",
+    "port": "1025",
+    "from": "no-reply@cauce.local",
+    "fromDisplayName": "Cauce",
+    "ssl": "false",
+    "starttls": "false",
+    "auth": "false"
+  },
+
+  "roles": {
+    "realm": [
+      {
+        "name": "patient",
+        "description": "Paciente con Síndrome de Intestino Irritable inscrito en el piloto clínico",
+        "composite": false
+      },
+      {
+        "name": "nutritionist",
+        "description": "Dietista-nutricionista revisor de recomendaciones",
+        "composite": false
+      }
+    ]
+  },
+
+  "defaultRoles": [],
+  "requiredCredentials": ["password"],
+
+  "clients": [
+    {
+      "clientId": "cauce-mobile",
+      "name": "Cauce Mobile App (Flutter)",
+      "description": "Cliente publico con PKCE para pacientes",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": true,
+      "redirectUris": [
+        "cauce://login-callback",
+        "http://localhost:*"
+      ],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "access.token.lifespan": "900",
+        "client.session.idle.timeout": "1800",
+        "client.session.max.lifespan": "2592000",
+        "use.refresh.tokens": "true",
+        "post.logout.redirect.uris": "+"
+      },
+      "defaultClientScopes": ["web-origins", "profile", "roles", "email"],
+      "optionalClientScopes": ["address", "phone", "offline_access", "microprofile-jwt"]
+    },
+    {
+      "clientId": "cauce-backend",
+      "name": "Cauce Backend API (.NET)",
+      "description": "Cliente confidencial con service account para Admin API",
+      "enabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "secret": "REGENERAR_DESPUES_DEL_IMPORT",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": true,
+      "attributes": {
+        "access.token.lifespan": "900",
+        "client.secret.creation.time": "0"
+      },
+      "defaultClientScopes": ["web-origins", "profile", "roles", "email"]
+    },
+    {
+      "clientId": "cauce-web-portal",
+      "name": "Cauce Web Portal (Nutricionistas)",
+      "description": "Cliente confidencial con PKCE para portal web React",
+      "enabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "secret": "REGENERAR_DESPUES_DEL_IMPORT",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": true,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:5173/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://localhost:5173"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "access.token.lifespan": "900",
+        "client.session.idle.timeout": "1800",
+        "client.session.max.lifespan": "28800",
+        "use.refresh.tokens": "true",
+        "post.logout.redirect.uris": "+"
+      },
+      "defaultClientScopes": ["web-origins", "profile", "roles", "email"]
+    }
+  ]
+}
