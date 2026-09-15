@@ -183,5 +183,16 @@
       ],
       "defaultClientScopes": ["web-origins", "profile", "roles", "email", "basic"]
     }
+  ],
+
+  "users": [
+    {
+      "username": "service-account-cauce-backend",
+      "enabled": true,
+      "serviceAccountClientId": "cauce-backend",
+      "clientRoles": {
+        "realm-management": ["manage-users", "view-users", "view-realm"]
+      }
+    }
   ]
 }
