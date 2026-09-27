@@ -99,6 +99,27 @@ GRANT ALL PRIVILEGES ON DATABASE keycloak TO keycloak;
 
 (Usa la misma contraseña que pusiste en `KEYCLOAK_DB_PASSWORD` del `.env`.)
 
+## Cambios del realm en un Keycloak ya importado
+
+Keycloak arranca con `--import-realm`, que **solo importa el realm si no existe**. Un cambio en
+`keycloak/import/realm.json` llega a las instalaciones nuevas, pero no a un Keycloak que ya importó el realm.
+Borrar el realm para reimportarlo haría perder los usuarios, así que los cambios se aplican con scripts
+idempotentes que usan `kcadm` dentro del contenedor. Se corren desde esta carpeta, en PowerShell o Git Bash:
+
+```bash
+# Cliente cauce-web-portal del acta A68: Direct Access Grants ON, Standard Flow OFF, redirect al portal.
+# Si el secret sigue siendo el marcador del import, lo regenera. Imprime el secret vigente al final.
+docker cp keycloak/apply-portal-client.sh cauce-keycloak:/tmp/apply-portal-client.sh
+docker exec cauce-keycloak bash -c "tr -d '\r' < /tmp/apply-portal-client.sh | bash"
+
+# Solo desarrollo, una vez: contraseña permanente para el nutricionista demo.
+docker cp keycloak/dev-demo-nutritionist-password.sh cauce-keycloak:/tmp/dev-demo.sh
+docker exec cauce-keycloak bash -c "tr -d '\r' < /tmp/dev-demo.sh | bash"
+```
+
+El `tr` quita los CR que Git agrega a los `.sh` en Windows. El paso a paso completo, con lo que debería verse
+en pantalla y cómo guardar el secret en el backend, está en `backend/docs/dev/SEED-USERS.md`.
+
 ## Troubleshooting
 
 **Keycloak tarda mucho en arrancar.** Normal en el primer arranque (~45-60s). Mira los logs con `docker compose logs -f keycloak` hasta ver el mensaje `Keycloak X.Y started in N ms`.
