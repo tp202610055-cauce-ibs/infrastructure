@@ -139,32 +139,29 @@
     {
       "clientId": "cauce-web-portal",
       "name": "Cauce Web Portal (Nutricionistas)",
-      "description": "Cliente confidencial con PKCE para portal web React",
+      "description": "Cliente confidencial del portal web React. El backend pide sus tokens con Direct Access Grants y el secret; el navegador nunca habla con Keycloak (acta A68)",
       "enabled": true,
       "publicClient": false,
       "protocol": "openid-connect",
       "secret": "REGENERAR_DESPUES_DEL_IMPORT",
-      "standardFlowEnabled": true,
+      "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "authorizationServicesEnabled": false,
       "fullScopeAllowed": true,
       "redirectUris": [
-        "http://localhost:3000/*",
         "http://localhost:5173/*"
       ],
       "webOrigins": [
-        "http://localhost:3000",
         "http://localhost:5173"
       ],
       "attributes": {
-        "pkce.code.challenge.method": "S256",
         "access.token.lifespan": "900",
         "client.session.idle.timeout": "1800",
         "client.session.max.lifespan": "28800",
         "use.refresh.tokens": "true",
-        "post.logout.redirect.uris": "+"
+        "post.logout.redirect.uris": "http://localhost:5173/*"
       },
       "protocolMappers": [
         {
