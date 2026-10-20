@@ -158,7 +158,7 @@
       ],
       "attributes": {
         "access.token.lifespan": "900",
-        "client.session.idle.timeout": "1800",
+        "client.session.idle.timeout": "900",
         "client.session.max.lifespan": "28800",
         "use.refresh.tokens": "true",
         "post.logout.redirect.uris": "http://localhost:5173/*"
