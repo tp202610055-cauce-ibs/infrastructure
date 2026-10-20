@@ -48,7 +48,7 @@ fi
   -s "attributes.\"post.logout.redirect.uris\"=$PORTAL_URL/*" \
   -s 'attributes."pkce.code.challenge.method"=' \
   -s 'attributes."access.token.lifespan"=900' \
-  -s 'attributes."client.session.idle.timeout"=1800' \
+  -s 'attributes."client.session.idle.timeout"=900' \
   -s 'attributes."client.session.max.lifespan"=28800'
 
 SECRET=$("$KCADM" get "clients/$INTERNAL_ID/client-secret" -r "$REALM" --fields value --format csv --noquotes --config "$CONFIG")
