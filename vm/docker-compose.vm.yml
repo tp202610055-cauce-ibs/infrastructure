@@ -1,0 +1,272 @@
+# Pila completa de Cauce para la VM de QA. Se usa desde esta carpeta con:
+#   docker compose -f docker-compose.vm.yml <comando>      (lee las variables de ./.env)
+
+name: cauce
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    command: ["postgres", "-c", "max_connections=50", "-c", "shared_buffers=96MB"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      KEYCLOAK_DB_NAME: ${KEYCLOAK_DB_NAME}
+      KEYCLOAK_DB_USER: ${KEYCLOAK_DB_USER}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    mem_limit: 400m
+    networks: [cauce]
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    restart: unless-stopped
+    command: ["start", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${KEYCLOAK_DB_NAME}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_DB_POOL_MAX_SIZE: "10"
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HOSTNAME: https://portal.${DOMAIN}
+      KC_HOSTNAME_ADMIN: http://localhost:8081
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      JAVA_OPTS_KC_HEAP: "-Xms256m -Xmx768m"
+    ports:
+      # Solo para la consola de administración por túnel SSH.
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - ../keycloak/import:/opt/keycloak/data/import:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '\"status\": \"UP\"'"
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+    mem_limit: 1g
+    networks: [cauce]
+
+  keydb:
+    image: eqalpha/keydb:alpine_x86_64_v6.3.4
+    restart: unless-stopped
+    command: ["keydb-server", "--requirepass", "${KEYDB_PASSWORD}", "--appendonly", "yes",
+              "--maxmemory", "150mb", "--maxmemory-policy", "noeviction"]
+    environment:
+      KEYDB_PASSWORD: ${KEYDB_PASSWORD}
+    volumes:
+      - keydb-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "keydb-cli --no-auth-warning -a \"$$KEYDB_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 200m
+    networks: [cauce]
+
+  minio:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      # Solo para la consola web por túnel SSH; la API se publica por Caddy en archivos.<dominio>.
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    mem_limit: 300m
+    networks: [cauce]
+
+  # Crea el usuario propio de la API en MinIO. Corre a demanda:
+  #   docker compose -f docker-compose.vm.yml run --rm minio-init
+  minio-init:
+    image: pgsty/mc:RELEASE.2026-10-18T00-00-00Z
+    profiles: [init]
+    entrypoint: ["/bin/sh", "/minio-init.sh"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_API_ACCESS_KEY: ${MINIO_API_ACCESS_KEY}
+      MINIO_API_SECRET_KEY: ${MINIO_API_SECRET_KEY}
+    volumes:
+      - ./minio-init.sh:/minio-init.sh:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks: [cauce]
+
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    restart: unless-stopped
+    environment:
+      MP_WEBROOT: /mail/
+      MP_DATABASE: /data/mailpit.db
+      MP_MAX_MESSAGES: "5000"
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    volumes:
+      - mailpit-data:/data
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    mem_limit: 64m
+    networks: [cauce]
+
+  api:
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    image: cauce-api:${API_IMAGE_TAG:-local}
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      DOTNET_gcServer: "0"
+      Serilog__MinimumLevel__Override__Microsoft.EntityFrameworkCore: Warning
+      ConnectionStrings__Cauce: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD};Maximum Pool Size=20"
+      Keycloak__Authority: https://portal.${DOMAIN}/realms/cauce
+      Keycloak__InternalBaseUrl: http://keycloak:8080
+      Keycloak__RequireHttpsMetadata: "false"
+      Keycloak__ClientSecret: ${KEYCLOAK_BACKEND_CLIENT_SECRET}
+      Keycloak__WebPortalClientSecret: ${KEYCLOAK_PORTAL_CLIENT_SECRET}
+      KeyDb__ConnectionString: "keydb:6379,password=${KEYDB_PASSWORD},abortConnect=false"
+      PortalSession__CookieSecure: "true"
+      ForwardedHeaders__Enabled: "true"
+      ForwardedHeaders__KnownNetworks__0: 172.28.0.0/16
+      Cors__AllowedOrigins: https://portal.${DOMAIN}
+      AdminApi__Value: ${ADMIN_API_KEY}
+      Email__SmtpHost: mailpit
+      Email__SmtpPort: "1025"
+      Email__UseSsl: "false"
+      Email__PortalAppBaseUrl: https://portal.${DOMAIN}
+      Email__MobileAppBaseUrl: "cauce://"
+      Storage__Minio__Endpoint: minio:9000
+      Storage__Minio__UseSsl: "false"
+      Storage__Minio__AccessKey: ${MINIO_API_ACCESS_KEY}
+      Storage__Minio__SecretKey: ${MINIO_API_SECRET_KEY}
+      Storage__Minio__PublicEndpoint: archivos.${DOMAIN}
+      Storage__Minio__PublicUseSsl: "true"
+      Notifications__Fcm__UseFake: ${FCM_USE_FAKE:-true}
+      Notifications__Fcm__CredentialsPath: /run/secrets/cauce/firebase-sa.json
+      Recommendations__AutoApprovalEnabled: "false"
+      Recommendations__ExpirationWindowHours: ${RECOMMENDATIONS_EXPIRATION_WINDOW_HOURS:-72}
+      RateLimiting__Enabled: "true"
+      Workers__OutboxDispatcher__Enabled: ${WORKERS_OUTBOX_DISPATCHER_ENABLED:-true}
+      Workers__NotificationDispatcher__Enabled: ${WORKERS_NOTIFICATION_DISPATCHER_ENABLED:-true}
+      Workers__RecommendationExpiration__Enabled: ${WORKERS_RECOMMENDATION_EXPIRATION_ENABLED:-true}
+      Workers__RecommendationArchival__Enabled: ${WORKERS_RECOMMENDATION_ARCHIVAL_ENABLED:-true}
+      Workers__OutboxRetention__Enabled: ${WORKERS_OUTBOX_RETENTION_ENABLED:-true}
+      Workers__WeeklyReminder__Enabled: ${WORKERS_WEEKLY_REMINDER_ENABLED:-true}
+      Workers__IbsSssReminder__Enabled: ${WORKERS_IBS_SSS_REMINDER_ENABLED:-true}
+    volumes:
+      # Carpeta y no archivo: si faltara el archivo, Docker crearía un directorio con su nombre.
+      - ./secrets:/run/secrets/cauce:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keydb:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/v1/health/ready"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    mem_limit: 700m
+    networks: [cauce]
+
+  caddy:
+    image: caddy:2.11.7
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+      ACME_CA: ${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+      MAIL_USER: ${MAIL_USER}
+      MAIL_PASSWORD_HASH: ${MAIL_PASSWORD_HASH}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+      - portal-static:/srv/portal:ro
+    depends_on:
+      api:
+        condition: service_started
+      keycloak:
+        condition: service_started
+      mailpit:
+        condition: service_started
+      minio:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    mem_limit: 64m
+    networks: [cauce]
+
+volumes:
+  postgres-data:
+    name: cauce-vm-postgres-data
+  keydb-data:
+    name: cauce-vm-keydb-data
+  minio-data:
+    name: cauce-vm-minio-data
+  mailpit-data:
+    name: cauce-vm-mailpit-data
+  caddy-data:
+    name: cauce-vm-caddy-data
+  caddy-config:
+    name: cauce-vm-caddy-config
+  portal-static:
+    name: cauce-vm-portal-static
+
+networks:
+  cauce:
+    name: cauce-vm
+    ipam:
+      config:
+        # Subred fija: la API confía en los encabezados X-Forwarded-* que llegan desde aquí (Caddy).
+        - subnet: 172.28.0.0/16
