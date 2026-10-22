@@ -2,6 +2,8 @@
 
 Stack local de Docker para el desarrollo de Cauce. Incluye Postgres, Adminer, Keycloak, KeyDB, MinIO y Ollama.
 
+Para instalar y operar Cauce en la VM de QA, la guía es [`README-VM.md`](README-VM.md).
+
 ## Setup inicial (solo la primera vez)
 
 1. Copiar el archivo de variables de entorno:
