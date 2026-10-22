@@ -3,6 +3,10 @@
 .env.local
 .env.*.local
 
+# VM: archivo de cuenta de servicio de Firebase y marca de congelamiento de la semana de pruebas
+vm/secrets/
+vm/.freeze
+
 # Logs
 *.log
 logs/

@@ -51,6 +51,30 @@ fi
   -s 'attributes."client.session.idle.timeout"=900' \
   -s 'attributes."client.session.max.lifespan"=28800'
 
+# En la VM, vm/keycloak-sync.sh pasa los dos secretos de vm/.env: se fijan tal cual y no se imprimen.
+if [ -n "${PORTAL_CLIENT_SECRET:-}${BACKEND_CLIENT_SECRET:-}" ]; then
+  if [ -z "${PORTAL_CLIENT_SECRET:-}" ] || [ -z "${BACKEND_CLIENT_SECRET:-}" ]; then
+    rm -f "$CONFIG"
+    echo "ERROR: hacen falta PORTAL_CLIENT_SECRET y BACKEND_CLIENT_SECRET a la vez." >&2
+    exit 1
+  fi
+
+  BACKEND_INTERNAL_ID=$("$KCADM" get clients -r "$REALM" -q clientId=cauce-backend --fields id --format csv --noquotes --config "$CONFIG")
+  if [ -z "$BACKEND_INTERNAL_ID" ]; then
+    rm -f "$CONFIG"
+    echo "ERROR: no existe el cliente cauce-backend en el realm $REALM." >&2
+    exit 1
+  fi
+
+  # Por stdin y no con -s: un argumento de kcadm se vería con ps desde el host.
+  printf '{"secret":"%s"}' "$PORTAL_CLIENT_SECRET" | "$KCADM" update "clients/$INTERNAL_ID" -r "$REALM" --config "$CONFIG" -f -
+  printf '{"secret":"%s"}' "$BACKEND_CLIENT_SECRET" | "$KCADM" update "clients/$BACKEND_INTERNAL_ID" -r "$REALM" --config "$CONFIG" -f -
+  rm -f "$CONFIG"
+  echo "Cliente $CLIENT_ID actualizado: Direct Access Grants ON, Standard Flow OFF, redirect $PORTAL_URL/*."
+  echo "Secretos de $CLIENT_ID y cauce-backend sincronizados con los recibidos (no se muestran)."
+  exit 0
+fi
+
 SECRET=$("$KCADM" get "clients/$INTERNAL_ID/client-secret" -r "$REALM" --fields value --format csv --noquotes --config "$CONFIG")
 if [ "$SECRET" = "$PLACEHOLDER" ] || [ -z "$SECRET" ]; then
   "$KCADM" create "clients/$INTERNAL_ID/client-secret" -r "$REALM" --config "$CONFIG" >/dev/null

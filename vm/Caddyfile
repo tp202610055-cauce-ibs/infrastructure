@@ -1,0 +1,86 @@
+# Proxy HTTPS de Cauce. DOMAIN, ACME_EMAIL, ACME_CA, MAIL_USER y MAIL_PASSWORD_HASH llegan como
+# variables de entorno desde docker-compose.vm.yml; los certificados viven en el volumen caddy-data.
+{
+	email {$ACME_EMAIL}
+	acme_ca {$ACME_CA}
+	log {
+		output stdout
+	}
+}
+
+(cabeceras) {
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
+
+portal.{$DOMAIN} {
+	# El enlace de restablecer contraseña lleva su token en la consulta: no se registra.
+	log {
+		output stdout
+		format filter {
+			request>uri query {
+				delete token
+			}
+		}
+	}
+	encode zstd gzip
+	import cabeceras
+
+	# La API de administración solo se usa desde la VM: docker compose exec api curl http://localhost:8080/...
+	handle /api/v1/admin/* {
+		respond 404
+	}
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+
+	# Solo el realm de la aplicación y sus recursos estáticos; el resto de Keycloak no se publica.
+	handle /realms/cauce/* {
+		reverse_proxy keycloak:8080
+	}
+	handle /resources/* {
+		reverse_proxy keycloak:8080
+	}
+	@keycloak_privado path /realms /realms/* /admin /admin/* /health /health/* /metrics /metrics/*
+	handle @keycloak_privado {
+		respond 404
+	}
+
+	handle /mail* {
+		basic_auth {
+			{$MAIL_USER} {$MAIL_PASSWORD_HASH}
+		}
+		reverse_proxy mailpit:8025
+	}
+
+	# Portal web: archivos estáticos del volumen portal-static, con regreso a index.html para la SPA.
+	handle {
+		root * /srv/portal
+		@sin_portal not file /index.html
+		header @sin_portal Content-Type "text/html; charset=utf-8"
+		respond @sin_portal "<!doctype html><html lang=\"es\"><meta charset=\"utf-8\"><title>Cauce</title><p>El portal de Cauce está en preparación.</p></html>" 200
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+# Solo la API de MinIO; la consola no se publica. Caddy conserva el Host original, que forma parte
+# de la firma de las URL prefirmadas.
+archivos.{$DOMAIN} {
+	# Sin la firma ni la credencial de las URL prefirmadas, que valen hasta 24 horas.
+	log {
+		output stdout
+		format filter {
+			request>uri query {
+				delete X-Amz-Signature
+				delete X-Amz-Credential
+			}
+		}
+	}
+	import cabeceras
+	reverse_proxy minio:9000
+}
