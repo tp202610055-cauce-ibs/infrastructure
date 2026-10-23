@@ -212,6 +212,35 @@ services:
     mem_limit: 700m
     networks: [cauce]
 
+  # Portal web: nginx con el build de web-portal. update.sh construye la imagen en la VM; solo Caddy la alcanza.
+  portal-web:
+    image: cauce/portal-web:${PORTAL_WEB_TAG:-local}
+    # La imagen solo existe en la VM: nunca se busca en Docker Hub.
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      # Entra en la CSP del portal; si no es un origen https válido, el contenedor sale con error.
+      PORTAL_FILES_ORIGIN: https://archivos.${DOMAIN}
+    # Raíz de solo lectura; nginx (uid 101) escribe su configuración y sus temporales en memoria.
+    read_only: true
+    tmpfs:
+      - /tmp:uid=101,gid=101,mode=0755
+      - /etc/nginx/conf.d:uid=101,gid=101,mode=0755
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    mem_limit: 64m
+    networks: [cauce]
+
   caddy:
     image: caddy:2.11.7
     restart: unless-stopped
@@ -229,7 +258,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
-      - portal-static:/srv/portal:ro
+    # Sin portal-web a propósito: si el portal no arranca, la API, Keycloak y /mail siguen publicados.
     depends_on:
       api:
         condition: service_started
@@ -260,8 +289,6 @@ volumes:
     name: cauce-vm-caddy-data
   caddy-config:
     name: cauce-vm-caddy-config
-  portal-static:
-    name: cauce-vm-portal-static
 
 networks:
   cauce:
