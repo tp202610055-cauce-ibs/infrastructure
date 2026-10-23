@@ -8,13 +8,13 @@
 	}
 }
 
+# Valores por defecto (?): si el servicio ya envía la cabecera, como la imagen del portal, se respeta la suya.
+# Una directiva por cabecera: varias con ? en un mismo bloque solo se aplican si faltan todas.
 (cabeceras) {
-	header {
-		X-Content-Type-Options nosniff
-		X-Frame-Options SAMEORIGIN
-		Referrer-Policy strict-origin-when-cross-origin
-		-Server
-	}
+	header ?X-Content-Type-Options nosniff
+	header ?X-Frame-Options SAMEORIGIN
+	header ?Referrer-Policy strict-origin-when-cross-origin
+	header -Server
 }
 
 portal.{$DOMAIN} {
@@ -29,6 +29,8 @@ portal.{$DOMAIN} {
 	}
 	encode zstd gzip
 	import cabeceras
+	# Una semana, sin includeSubDomains ni preload. Diferida (>): reemplaza la que envía Keycloak.
+	header >Strict-Transport-Security "max-age=604800"
 
 	# La API de administración solo se usa desde la VM: docker compose exec api curl http://localhost:8080/...
 	handle /api/v1/admin/* {
@@ -57,14 +59,9 @@ portal.{$DOMAIN} {
 		reverse_proxy mailpit:8025
 	}
 
-	# Portal web: archivos estáticos del volumen portal-static, con regreso a index.html para la SPA.
+	# Portal web: la imagen portal-web sirve la SPA y responde 404 a las rutas de otros servicios.
 	handle {
-		root * /srv/portal
-		@sin_portal not file /index.html
-		header @sin_portal Content-Type "text/html; charset=utf-8"
-		respond @sin_portal "<!doctype html><html lang=\"es\"><meta charset=\"utf-8\"><title>Cauce</title><p>El portal de Cauce está en preparación.</p></html>" 200
-		try_files {path} /index.html
-		file_server
+		reverse_proxy portal-web:8080
 	}
 }
 
