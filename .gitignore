@@ -7,6 +7,10 @@
 vm/secrets/
 vm/.freeze
 
+# VM: contraseñas de las cuentas de QA (y temporales de .env) y candado de qa.sh
+vm/.env.*
+vm/.qa.lock
+
 # Logs
 *.log
 logs/
