@@ -181,7 +181,7 @@ services:
       Notifications__Fcm__CredentialsPath: /run/secrets/cauce/firebase-sa.json
       Recommendations__AutoApprovalEnabled: "false"
       Recommendations__ExpirationWindowHours: ${RECOMMENDATIONS_EXPIRATION_WINDOW_HOURS:-72}
-      RateLimiting__Enabled: "true"
+      RateLimiting__Enabled: ${RATE_LIMITING_ENABLED:-true}
       Workers__OutboxDispatcher__Enabled: ${WORKERS_OUTBOX_DISPATCHER_ENABLED:-true}
       Workers__NotificationDispatcher__Enabled: ${WORKERS_NOTIFICATION_DISPATCHER_ENABLED:-true}
       Workers__RecommendationExpiration__Enabled: ${WORKERS_RECOMMENDATION_EXPIRATION_ENABLED:-true}
