@@ -1,12 +1,23 @@
 #!/usr/bin/env bash
 # Crea vm/.env con secretos aleatorios para la VM. Se niega a sobrescribir uno existente.
-# Uso: bash vm/generate-env.sh <dominio> <correo-para-lets-encrypt>
+# Uso: bash vm/generate-env.sh [--qa] <dominio> <correo-para-lets-encrypt>      (--qa: nace con el modo QA encendido)
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
-DOMAIN="${1:?Uso: bash vm/generate-env.sh <dominio> <correo-para-lets-encrypt>}"
-ACME_EMAIL="${2:?Uso: bash vm/generate-env.sh <dominio> <correo-para-lets-encrypt>}"
+QA_MODE=false
+ARGS=()
+for arg in "$@"; do
+  if [ "$arg" = --qa ]; then
+    QA_MODE=true
+  else
+    ARGS+=("$arg")
+  fi
+done
+set -- "${ARGS[@]}"
+
+DOMAIN="${1:?Uso: bash vm/generate-env.sh [--qa] <dominio> <correo-para-lets-encrypt>}"
+ACME_EMAIL="${2:?Uso: bash vm/generate-env.sh [--qa] <dominio> <correo-para-lets-encrypt>}"
 ENV_FILE=.env
 CADDY_IMAGE=caddy:2.11.7
 
@@ -71,11 +82,17 @@ WORKERS_RECOMMENDATION_ARCHIVAL_ENABLED=true
 WORKERS_OUTBOX_RETENTION_ENABLED=true
 WORKERS_WEEKLY_REMINDER_ENABLED=true
 WORKERS_IBS_SSS_REMINDER_ENABLED=true
+RATE_LIMITING_ENABLED=true
 
 MAIL_USER=$MAIL_USER
 MAIL_PASSWORD_HASH='$MAIL_PASSWORD_HASH'
 EOF
 chmod 600 "$ENV_FILE"
+
+if [ "$QA_MODE" = true ]; then
+  . ./qa-switches.sh
+  qa_switch_set_all "$ENV_FILE" false
+fi
 
 # Carpeta del archivo de cuenta de servicio de Firebase (ignorada por git).
 mkdir -p secrets
@@ -88,3 +105,8 @@ echo "  usuario:    $MAIL_USER"
 echo "  contraseña: $MAIL_PASSWORD"
 echo
 echo "Guárdala ahora: no queda escrita en ningún archivo, solo su hash."
+if [ "$QA_MODE" = true ]; then
+  echo
+  echo "MODO QA ENCENDIDO: recordatorios, archivado, expiración y límite de peticiones apagados."
+  echo "Para revisarlo o apagarlo: bash vm/qa-mode.sh status   (o off)"
+fi
