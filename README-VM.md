@@ -45,6 +45,8 @@ cd ~/cauce/infrastructure
 bash vm/generate-env.sh <DOMINIO> <correo-para-lets-encrypt>
 ```
 
+Si la VM es para la semana de QA, agrega `--qa`: el `.env` nace con el modo QA encendido (sección 11).
+
 Construye las imágenes de la API y del portal, migra, sincroniza los secretos de Keycloak y levanta todo con
 las versiones etiquetadas. Los argumentos son las referencias de `backend`, `infrastructure` y `web-portal`.
 
@@ -169,8 +171,12 @@ Desde Windows, sube el archivo de cuenta de servicio (PowerShell):
 scp C:\ruta\firebase-sa.json azureuser@<IP>:~/cauce/infrastructure/vm/secrets/firebase-sa.json
 ```
 
-En la VM, deja el archivo legible solo para el usuario del contenedor (`app`, UID 1654). Si el contenedor no
-puede leerlo, la API no arranca y el log nombra la ruta.
+En la VM, deja el archivo legible solo para el usuario del contenedor (`app`, UID 1654). Si el archivo falta o el
+contenedor no puede leerlo, la API **arranca igual** y el resto sigue funcionando:
+
+- Al arrancar deja en el log `Firebase Cloud Messaging could not be initialized from Notifications__Fcm__CredentialsPath`.
+- Cada push falla con el error `fcm_unavailable`, hasta corregir el archivo y recrear la API (`dc up -d api`). El
+  cliente de Firebase se crea una sola vez, al arrancar.
 
 ```bash
 sudo chown 1654:1654 secrets/firebase-sa.json
@@ -216,6 +222,8 @@ touch ~/cauce/infrastructure/vm/.freeze
 rm ~/cauce/infrastructure/vm/.freeze
 ```
 
+Antes de congelar, enciende el modo QA y siembra las cuentas (secciones 11 y 12).
+
 Vigilar sin tocar nada:
 
 ```bash
@@ -246,8 +254,9 @@ Los builds de `update.sh` también usan memoria: el del portal limita Node a 1 G
 
 ## 6. Interruptores sin tocar código
 
-En `.env`: `RECOMMENDATIONS_EXPIRATION_WINDOW_HOURS` y los siete `WORKERS_*_ENABLED`. Cambiar uno exige recrear
-solo la API, **fuera del horario de pruebas**:
+En `.env`: `RECOMMENDATIONS_EXPIRATION_WINDOW_HOURS`, los siete `WORKERS_*_ENABLED` y `RATE_LIMITING_ENABLED`
+(límite de peticiones de la API; sin la clave vale `true`). Cinco de ellos los maneja `qa-mode.sh` (sección 11).
+Cambiar uno exige recrear solo la API, **fuera del horario de pruebas**:
 
 ```bash
 nano .env
@@ -285,6 +294,8 @@ del `.env`) y <http://localhost:9001> (`MINIO_ROOT_USER` y `MINIO_ROOT_PASSWORD`
 | Memoria | `docker stats --no-stream` |
 | Recrear solo la API | `dc up -d api` |
 | Recrear solo el portal | `dc up -d portal-web` |
+| Ver el modo QA (desde `~/cauce/infrastructure`) | `bash vm/qa-mode.sh status` |
+| Revisar los casos de QA (desde `~/cauce/infrastructure`) | `bash vm/qa.sh verify-qa --all` |
 
 ## 10. Decisiones del portal en la VM (D-1b)
 
@@ -298,3 +309,140 @@ Se registran aquí y no abren acta en `backend`.
 | Contenedor | `portal-web` como lo entrega `web-portal`: raíz de solo lectura, `tmpfs` para nginx, sin capacidades, `no-new-privileges`, 64 MB. `PORTAL_FILES_ORIGIN` se arma con `DOMAIN` y la imagen nunca se busca en Docker Hub |
 | Disponibilidad | Caddy no depende de `portal-web`: si el portal falla, la API, Keycloak y `/mail` siguen arriba |
 | Actualización | `update.sh` recibe tres referencias, construye las dos imágenes antes de tocar servicios y escribe `.env` solo si ambas salen bien |
+
+## 11. Modo QA y comandos a demanda
+
+Durante la semana de QA la VM corre en modo QA. Se declara en el documento de entrega.
+
+| Pieza | En modo QA |
+| --- | --- |
+| Recordatorios IBS-SSS y semanal, archivado y expiración de recomendaciones | Apagados. Se disparan a demanda con `qa.sh` |
+| Límite de peticiones (`RATE_LIMITING_ENABLED`) | Apagado: los revisores pueden compartir una IP y recibirían `429` |
+| `OutboxDispatcher`, `NotificationDispatcher` y `OutboxRetention` | Encendidos: los eventos, los correos y los push siguen saliendo |
+
+Los scripts se corren siempre con `bash`, desde `~/cauce/infrastructure` (en git no son ejecutables):
+
+```bash
+cd ~/cauce/infrastructure
+```
+
+### Regla de horario
+
+- Recrear la API (`dc up -d api`) la corta de 30 a 60 s: solo **fuera del horario de pruebas**.
+- `seed-qa` también va fuera de horario. `reset-qa` de un caso, solo cuando nadie lo está probando.
+- `verify-qa` e `inspect-qa` son de solo lectura: se pueden correr en cualquier momento.
+
+### Encender, apagar y revisar: `qa-mode.sh`
+
+```bash
+bash vm/qa-mode.sh status
+bash vm/qa-mode.sh on
+bash vm/qa-mode.sh off
+```
+
+- Edita solo cinco claves de `vm/.env` y agrega las que falten. Repetirlo no cambia nada, y el archivo conserva
+  su permiso 600. No regenera ni imprime el resto del `.env`.
+- Muestra las cinco claves antes y después, y la columna «API en marcha» con lo que usa el contenedor ahora.
+  Mientras el modo QA esté encendido imprime el aviso `MODO QA ENCENDIDO`.
+- No recrea la API: imprime el comando, que va fuera del horario de pruebas.
+
+### Comandos a demanda: `qa.sh`
+
+Una vez por VM, crea `vm/.env.qa` (permiso 600, ignorado por git) con tres contraseñas aleatorias que cumplen la
+política del realm:
+
+```bash
+bash vm/qa.sh init
+```
+
+Imprime **una sola vez** las contraseñas de pacientes y de nutricionistas, para el documento de entrega. Para
+volver a ver una, o la de las cuentas de humo:
+
+> **No pegues estas contraseñas en ningún chat**, conversación con un asistente, ticket ni correo. Solo van en el
+> documento de entrega para los revisores y en `vm/.env.qa` de esta VM.
+
+```bash
+bash vm/qa.sh show smoke          # o patient, nutritionist
+```
+
+| Comando | Qué hace | Confirmación |
+| --- | --- | --- |
+| `bash vm/qa.sh seed-qa` | Siembra idempotente de las cuentas y los datos de los casos | Escribir `seed-qa` |
+| `bash vm/qa.sh reset-qa CP001 [CP002 ...]` | Rearma uno o más casos, o cuentas por correo | Escribir `reset-qa` |
+| `bash vm/qa.sh verify-qa [CP001 ... \| --all]` | Revisa, sin escribir, que cada caso esté listo | No |
+| `bash vm/qa.sh process-ibs-sss` | Una pasada del recordatorio IBS-SSS con la hora actual; el push lo envía la API en marcha | No |
+| `audit-log`, `inspect-qa`, `archive-recommendations`, `expire-recommendations` | Llegan con una versión posterior del backend. Antes, responden con el código 2 | No |
+
+- Cualquier otro nombre se rechaza. La guía de cada comando está en `docs/qa/QA-COMMANDS.md` del backend.
+- Cada comando corre en un contenedor aparte (`docker compose run --rm --no-deps api`), con su propio límite de
+  700 MB. Si se queda sin memoria, cae el comando y no la API. Necesita Postgres y Keycloak arriba, no la API.
+- Fija `QA_MODE=1`, y `QA_ALLOW_DESTRUCTIVE=1` solo en `seed-qa` y `reset-qa`. Las contraseñas pasan al
+  contenedor por nombre: no quedan en `ps` ni en el historial.
+- Corre un comando a la vez. Si otro está en marcha, sale con el código 1 y dice cuál es. Un `dc run` a mano se
+  salta ese candado: usa siempre `qa.sh`.
+- `--yes` omite la confirmación. Sin terminal (por ejemplo, en cron) es obligatorio, y `qa.sh` agrega `-T` solo:
+
+```bash
+30 5 * * * cd ~/cauce/infrastructure && bash vm/qa.sh --yes reset-qa CP001 >> ~/qa-cron.log 2>&1
+```
+
+| Código de salida | Significado |
+| --- | --- |
+| 0 | Terminó bien |
+| 1 | Fallas (por ejemplo, un caso en `FALLA`), otro comando en marcha o confirmación cancelada |
+| 2 | Rechazado: comando fuera de la lista, falta una variable, un argumento no vale o la API no tiene ese comando |
+
+### Primera corrida
+
+En este orden, fuera del horario de pruebas:
+
+```bash
+bash vm/qa.sh init
+bash vm/qa.sh verify-qa CP001
+bash vm/qa.sh seed-qa
+bash vm/qa.sh verify-qa --all
+```
+
+`verify-qa CP001` antes de sembrar da `CP001 FALLA` y el código 1, y es normal: solo comprueba que el comando
+llega a la base y a Keycloak.
+
+| Paso | Si falla con | Qué hacer |
+| --- | --- | --- |
+| `verify-qa CP001` | Error de conexión a Postgres o Keycloak | `dc ps`: los dos deben estar `healthy`. `--no-deps` no los levanta; si están caídos, `dc up -d postgres keycloak` |
+| `verify-qa CP001` | `Unknown command` (código 2) | La imagen de la API es anterior a los comandos de QA: `update.sh` con un backend desde `v0.20.0-qa-seed` |
+| `seed-qa` | Falta una variable o una contraseña débil (código 2) | `vm/.env.qa` falta o se editó: revisa con `bash vm/qa.sh show <rol>`. No escribió nada |
+| `seed-qa` | Problemas del manifiesto o del catálogo (código 1) | Lista todo lo que falta y no escribe. Si faltan alimentos o alergias: `dc run --rm api seed-catalogs` y repite |
+| `seed-qa` | Error de Keycloak (`401` o `403`) | Secretos de los clientes desalineados: `bash keycloak-sync.sh` desde `vm/` y repite. Es idempotente |
+| `verify-qa --all` | Uno o más casos en `FALLA` | `bash vm/qa.sh reset-qa <CP>` y `verify-qa <CP>`. Si sigue en `FALLA`, avisa al backend con la línea del caso |
+
+## 12. Llevar una VM ya instalada al modo QA
+
+Fuera del horario de pruebas y sin `vm/.freeze`. El `.env` existente no se regenera: `update.sh` solo cambia las
+etiquetas de imagen y `qa-mode.sh` solo sus cinco claves.
+
+```bash
+cd ~/cauce/infrastructure
+bash vm/update.sh <ref-backend> <ref-infra> <ref-web>
+bash vm/qa-mode.sh on
+cd vm && docker compose -f docker-compose.vm.yml up -d api && cd ..
+bash vm/qa-mode.sh status
+```
+
+- `<ref-infra>` es el tag de este bloque o, mientras no exista, su rama. `<ref-backend>`, desde `v0.20.0-qa-seed`.
+- Interrupción esperada: mientras `update.sh` construye, todo sigue arriba. Al final recrea la API y el portal si
+  sus imágenes cambiaron, de 30 a 60 s cada uno. `dc up -d api` vuelve a cortar la API de 30 a 60 s.
+- `status` debe mostrar `false` en las cinco claves, también en la columna «API en marcha».
+- Después sigue con la primera corrida de `qa.sh` (sección 11).
+
+## 13. Decisiones de la VM en modo QA (D-1c)
+
+Se registran aquí y no abren acta.
+
+| Tema | Decisión |
+| --- | --- |
+| Workers | En QA se apagan `IbsSssReminder`, `WeeklyReminder`, `RecommendationArchival` y `RecommendationExpiration`. Los despachadores siguen encendidos |
+| Límite de peticiones | `RATE_LIMITING_ENABLED` en el compose, con `true` por omisión. En QA va en `false` |
+| Comandos | `docker compose run --rm --no-deps` y no `exec`: el comando no comparte los 700 MB de la API ni depende de que esté arriba |
+| Candado | `flock` sobre `vm/.qa.lock`: el sistema lo suelta si el proceso muere, sin candados huérfanos |
+| Contraseñas de QA | En `vm/.env.qa`, solo en la VM. Pasan al contenedor por nombre |
+| Finales de línea | `.gitattributes` fija LF en `*.sh`, `*.yml` y `Caddyfile`, porque se editan desde Windows |
