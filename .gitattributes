@@ -1,0 +1,6 @@
+# Los scripts y la configuración corren en Linux: siempre LF, también si se editan desde Windows.
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Caddyfile text eol=lf
+*.onnx binary
