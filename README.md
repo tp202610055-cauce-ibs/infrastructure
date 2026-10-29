@@ -122,6 +122,51 @@ docker exec cauce-keycloak bash -c "tr -d '\r' < /tmp/dev-demo.sh | bash"
 El `tr` quita los CR que Git agrega a los `.sh` en Windows. El paso a paso completo, con lo que debería verse
 en pantalla y cómo guardar el secret en el backend, está en `backend/docs/dev/SEED-USERS.md`.
 
+### `verifyEmail` en falso (opción B del correo)
+
+`realm.json` trae `"verifyEmail": false`. Con la opción B del correo, el paciente entra a la app apenas se
+registra y la verificación del correo queda como recordatorio: el backend crea al usuario sin verificar y sin
+la acción pendiente `VERIFY_EMAIL`, y le manda el enlace con `send-verify-email`. Si el realm tuviera
+`verifyEmail` en `true`, Keycloak le pediría verificar el correo antes de dejarlo iniciar sesión.
+
+En la VM lo aplica `vm/keycloak-sync.sh`. En un Keycloak local que ya tiene datos, hazlo una vez a mano:
+
+1. Abre PowerShell o Git Bash y entra a la carpeta `infrastructure`:
+
+   ```bash
+   cd <ruta-a-tu-copia>/infrastructure
+   ```
+
+2. Comprueba que Keycloak esté arriba. En la columna `STATUS` de `keycloak` debe decir `healthy`:
+
+   ```bash
+   docker compose ps keycloak
+   ```
+
+3. Inicia sesión como administrador dentro del contenedor. El comando usa el usuario y la contraseña de
+   administrador que el contenedor ya tiene del `.env`, así que no hay que escribirlos. No imprime nada si
+   sale bien:
+
+   ```bash
+   docker compose exec keycloak bash -c '/opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080 --realm master --user "$KEYCLOAK_ADMIN" --password "$KEYCLOAK_ADMIN_PASSWORD"'
+   ```
+
+4. Cambia el ajuste. Tampoco imprime nada si sale bien:
+
+   ```bash
+   docker compose exec keycloak /opt/keycloak/bin/kcadm.sh update realms/cauce -s verifyEmail=false
+   ```
+
+5. Comprueba el resultado. Debe aparecer `"verifyEmail" : false`:
+
+   ```bash
+   docker compose exec keycloak /opt/keycloak/bin/kcadm.sh get realms/cauce --fields verifyEmail
+   ```
+
+Repetir los pasos no cambia nada. Si el paso 3 dice `Invalid user credentials`, la contraseña de administrador
+del `.env` no es la que tenía Keycloak cuando se creó: entra a la consola en `http://localhost:8081`, realm
+`cauce`, *Realm settings* → *Login* y apaga *Verify email*.
+
 ## Troubleshooting
 
 **Keycloak tarda mucho en arrancar.** Normal en el primer arranque (~45-60s). Mira los logs con `docker compose logs -f keycloak` hasta ver el mensaje `Keycloak X.Y started in N ms`.

@@ -6,7 +6,7 @@
   "registrationAllowed": false,
   "registrationEmailAsUsername": true,
   "rememberMe": false,
-  "verifyEmail": true,
+  "verifyEmail": false,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
   "resetPasswordAllowed": true,

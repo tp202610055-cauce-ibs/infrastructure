@@ -81,7 +81,11 @@ dc run --rm api seed-catalogs
 ```
 
 Si alguna vez necesitas volver a aplicar la configuración de los clientes de Keycloak, `bash keycloak-sync.sh`
-es idempotente.
+es idempotente. También deja `verifyEmail` en falso en el realm `cauce` e imprime
+`Realm cauce: verifyEmail <antes> -> false.`: con la opción B del correo, el paciente entra a la app sin haber
+verificado su correo, y el enlace de verificación le llega como recordatorio. `realm.json` ya trae el valor,
+pero el import no lo aplica a un realm que ya existe. Si el valor no queda en falso, el script se detiene con
+`ERROR`.
 
 `seed-catalogs` carga roles, alergias, alimentos, glosario, consentimiento, versión de modelo y buckets. No crea
 cuentas: las cuentas de QA llegan en el bloque D-2.
